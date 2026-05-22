@@ -1,0 +1,9 @@
+03/31/2025: Temperature ranging from 0 to 85 functioning and refreshing the LEDs as I want them to, along with warning temp thresholds. 
+
+TODO: 
+
+- improve resistor calibration
+- reverse-engineer car's PWM signal for illumination brightness, use to control LED brightness
+- clean up code
+- make LED ring actually fit tachometer
+- wire sensor into car, install teensy and power supply
