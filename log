@@ -7,3 +7,8 @@ TODO:
 - clean up code
 - make LED ring actually fit tachometer
 - wire sensor into car, install teensy and power supply
+
+07/21/2026: have made a ring that fits the tach and made some updates to the code.   
+wanted to use the segment between 0 and 8 as a temperature gauge, but the LEDs don't cooperate for some reason.    
+This may be due to 3.3v signal output from the teeensy, different microcontroller may work better.   
+still need to integrate into the car and figure out the dimmer from the car's PWM.   
