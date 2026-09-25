@@ -7,8 +7,11 @@ Goal is to have the same functionality of the upstream repo with the LED ring il
 
 Currently able to get a 20Hz update on the RPM since the ND3 CAN isn't broadcasting constantly and everything needs to be requested manually.
 Thanks to https://github.com/drewid74/2024-nd3-mazda-obdii for the updated ND3 CAN research.
-
+____________
 TODO
+
 -Write code for LED animations.
+
 -Install an Oil temp sensor to get real data rather than the estimated calculation from the CAN.
+
 -Find a way to get dash brightness. Maybe it is available via CAN since it also affects infotainment brightness.
