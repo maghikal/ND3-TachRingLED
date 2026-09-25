@@ -1,7 +1,14 @@
-# ND3-warmuplights
-microcontroller code for ND3 oil temp LED tacho ring   
-using a teensy 4.1, a microcontroller with 5v GPIOs might fix some of the things that don't work for me    
-(such as the commented out code for the lower right corner of the gauge to be a temp indicator)   
-   
-stl file can be printed, I used a K2 Plus and PETG filament. Plan to have a resin print made to better resemble factory ABS part.   
-CAD is here: https://cad.onshape.com/documents/b25162f9713fa15661423fd6/w/53d0347331b08031b02e28ca/e/2e697d4c8b46ce99411c26d5?renderMode=0&uiState=6a603d7cd82540fc6c9f8ce9
+# Miata ND3 Tach Ring LED
+
+Using an Adafruit Feather M4 CAN Express to power a ring of 22x WS2812B 5050 Narrow NeoPixels arranged around the ND3 Tachometer.
+
+Interfacing with the OBD-II port to get Engine RPM and the estimated Oil Temp.
+Goal is to have the same functionality of the upstream repo with the LED ring illuminating a faux redline, as well as a flashing shift indicator at optimal shift RPM ~7000-75000.
+
+Currently able to get a 20Hz update on the RPM since the ND3 CAN isn't broadcasting constantly and everything needs to be requested manually.
+Thanks to https://github.com/drewid74/2024-nd3-mazda-obdii for the updated ND3 CAN research.
+
+TODO
+-Write code for LED animations.
+-Install an Oil temp sensor to get real data rather than the estimated calculation from the CAN.
+-Find a way to get dash brightness. Maybe it is available via CAN since it also affects infotainment brightness.
