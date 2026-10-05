@@ -6,68 +6,27 @@
  * Hardware:
  *   Adafruit Feather M4 CAN
  *
- * CAN:
- *   500 kbit/s
- *
- * Standard OBD-II requests:
- *   Functional request ID = 0x7DF
- *   PCM response          = 0x7E8
- *
- * Mazda-specific request:
- *   PCM request ID        = 0x7E0
- *   PCM response          = 0x7E8
- *
- * Confirmed ND3 PIDs:
- *
- *   01 0C  Engine RPM
- *   01 0D  Vehicle speed
- *   01 05  Coolant temperature
- *   01 11  Throttle position
- *   01 04  Engine load
- *   01 0F  Intake air temperature
- *   01 10  MAF
- *   01 0B  Intake manifold pressure
- *   01 46  Ambient temperature
- *   01 42  Battery voltage
- *   01 2F  Fuel level
- *   01 0E  Ignition timing
- *   01 5E  Engine fuel rate
- *
- * Mazda-specific:
- *
- *   22 13 10  Engine oil temperature
+ * CAN Research:
+ *   https://github.com/drewid74/2024-nd3-mazda-obdii
  *
  * ================================================================
  */
 
 #include <CANSAME5x.h>
-
 CANSAME5x CAN;
 
 #include <Adafruit_NeoPixel.h>
 #include <math.h>
 #define RING_PIN 9
-#define LED_COUNT 24
+#define LED_COUNT 22
 Adafruit_NeoPixel ring(Adafruit_NeoPixel(LED_COUNT, RING_PIN, NEO_GRB + NEO_KHZ800));
-
-// ================================================================
-// CAN IDs
-// ================================================================
-
-const uint32_t OBD_FUNCTIONAL_ID = 0x7DF;
-const uint32_t PCM_REQUEST_ID    = 0x7E0;
-const uint32_t PCM_RESPONSE_ID   = 0x7E8;
 
 
 // ================================================================
 // Timing
 // ================================================================
 
-// Time between PID requests.
-// 50 ms = maximum of ~20 requests/sec.
-
 const uint32_t REQUEST_INTERVAL_MS = 50;
-
 const uint32_t RESPONSE_TIMEOUT_MS = 40;
 
 
@@ -115,6 +74,8 @@ void clearData()
 //
 // ================================================================
 
+const uint32_t OBD_FUNCTIONAL_ID = 0x7DF;
+
 void sendMode01(uint8_t pid)
 {
   CAN.beginPacket(OBD_FUNCTIONAL_ID);
@@ -122,7 +83,6 @@ void sendMode01(uint8_t pid)
   CAN.write(0x02);       // Number of following bytes
   CAN.write(0x01);       // Mode 01
   CAN.write(pid);
-
   // Padding
   CAN.write(0x00);
   CAN.write(0x00);
@@ -144,6 +104,10 @@ void sendMode01(uint8_t pid)
 //
 // ================================================================
 
+const uint32_t PCM_RESPONSE_ID   = 0x7E8;
+
+const uint32_t PCM_REQUEST_ID    = 0x7E0;
+
 void sendMode22(uint8_t pidHigh, uint8_t pidLow)
 {
   CAN.beginPacket(PCM_REQUEST_ID);
@@ -152,7 +116,6 @@ void sendMode22(uint8_t pidHigh, uint8_t pidLow)
   CAN.write(0x22);       // Mode 22
   CAN.write(pidHigh);
   CAN.write(pidLow);
-
   // Padding
   CAN.write(0x00);
   CAN.write(0x00);
@@ -222,10 +185,6 @@ bool getResponse(uint8_t *response, uint8_t &length)
 // Standard positive response:
 //
 //   04 41 PID A B
-//
-// Example RPM:
-//
-//   04 41 0C AA BB
 //
 // ================================================================
 
@@ -434,7 +393,7 @@ void printData()
 // Read one PID per loop
 // ================================================================
 //
-// Reading one PID at a time keeps the CAN traffic predictable.
+// Reading one PID at a time to not overwhelm CAN traffic.
 //
 // The sequence is:
 //
@@ -475,25 +434,15 @@ void setup()
 
   delay(1000);
 
-  /*
-  Serial.println();
-  Serial.println("========================================");
-  Serial.println(" Mazda MX-5 ND3 OBD-II Tach Light");
-  Serial.println(" Feather M4 CAN");
-  Serial.println("========================================");
-  */
-
   // Enable CAN transceiver.
-
   pinMode(PIN_CAN_STANDBY, OUTPUT);
   digitalWrite(PIN_CAN_STANDBY, false);
 
   pinMode(PIN_CAN_BOOSTEN, OUTPUT);
   digitalWrite(PIN_CAN_BOOSTEN, true);
 
-
+  /*
   // ND3 OBD-II CAN bus is 500 kbit/s.
-
   if (!CAN.begin(500000))
   {
     Serial.println("CAN initialization FAILED!");
@@ -504,6 +453,7 @@ void setup()
 
   Serial.println("CAN initialized at 500 kbit/s");
   Serial.println("Starting PID polling...");
+  */
 
   clearData();
 
@@ -530,6 +480,33 @@ uint32_t lastPrint = 0;
 void loop()
 {
   uint32_t now = millis();
+
+
+  ring.fill(ring.Color(255, 0, 0), 0, 24);
+  ring.show();
+  delay(200);
+  
+  ring.fill(ring.Color(0, 0, 255), 0, 24);
+  ring.show();
+  delay(200);
+
+  for(int i=0;i <= 21;i++)
+    {
+    ring.setPixelColor(i, ring.Color(255,0,0,0));
+    ring.show();
+    delay(10);
+    }
+    
+
+  for(int i=0;i <= 21;i++)
+    {
+    ring.setPixelColor(i, ring.Color(0,0,255,0));
+    ring.show();
+    delay(10);
+    }
+  
+    
+  
 
   // ------------------------------------------------
   // Poll one PID
