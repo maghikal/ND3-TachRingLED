@@ -10,8 +10,6 @@ Thanks to https://github.com/drewid74/2024-nd3-mazda-obdii for the updated ND3 C
 ____________
 TODO
 
--Write code for LED animations.
-
 -Install an Oil temp sensor to get real data rather than the estimated calculation from the CAN.
 
 -Find a way to get dash brightness. Maybe it is available via CAN since it also affects infotainment brightness.
