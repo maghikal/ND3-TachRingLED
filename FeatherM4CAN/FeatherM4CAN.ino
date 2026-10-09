@@ -21,6 +21,7 @@ CANSAME5x CAN;
 #define LED_COUNT 22
 Adafruit_NeoPixel ring(Adafruit_NeoPixel(LED_COUNT, RING_PIN, NEO_GRB + NEO_KHZ800));
 
+const uint32_t OPERATING_TEMP = 85;
 
 // ================================================================
 // Timing
@@ -41,6 +42,8 @@ struct VehicleData
 
   bool rpmValid;
   bool oilValid;
+  bool oilWarming;
+  bool oilOvertemp;
 };
 
 VehicleData data;
@@ -57,6 +60,8 @@ void clearData()
 
   data.rpmValid = false;
   data.oilValid = false;
+  data.oilWarming = true;
+  data.oilOvertemp = false;
 }
 
 
@@ -423,6 +428,125 @@ void readNextPID()
     pidIndex = 0;
 }
 
+// ================================================================
+// LED Animations
+// ================================================================
+void testAnimation()
+{
+  ring.fill(ring.Color(255, 0, 0), 0, LED_COUNT);
+  ring.show();
+  delay(200);
+  
+  ring.fill(ring.Color(0, 0, 255), 0, LED_COUNT);
+  ring.show();
+  delay(200);
+
+  for(int i=0;i < LED_COUNT;i++)
+  {
+    ring.setPixelColor(i, ring.Color(255,0,0));
+    ring.show();
+    delay(10);
+  }
+    
+
+  for(int i=0;i < LED_COUNT;i++)
+  {
+    ring.setPixelColor(i, ring.Color(0,0,255));
+    ring.show();
+    delay(10);
+  }
+
+  for (int brightness = 0; brightness <= 255; brightness++)
+  {
+    ring.fill(ring.Color(brightness, 0, 0), 0, LED_COUNT);
+    ring.show();
+    delay(1);
+  }
+  for (int brightness = 255; brightness >= 0; brightness--)
+  {
+    ring.fill(ring.Color(brightness, 0, 0), 0, LED_COUNT);
+    ring.show();
+    delay(1);
+  }
+}
+
+
+//Overtemp Animation
+int overtempBrightness = 0;
+int overtempDirection = 1;
+uint32_t lastOvertempUpdate = 0;
+const uint32_t OVERTEMP_INTERVAL_MS = 5;
+
+void updateOvertempAnimation(uint32_t now)
+{
+  if ((uint32_t)(now - lastOvertempUpdate) < OVERTEMP_INTERVAL_MS)
+    return;
+
+  lastOvertempUpdate = now;
+  overtempBrightness += overtempDirection;
+
+  if (overtempBrightness >= 255)
+  {
+    overtempBrightness = 255;
+    overtempDirection = -1;
+  }
+  else if (overtempBrightness <= 0)
+  {
+    overtempBrightness = 0;
+    overtempDirection = 1;
+  }
+  ring.fill(ring.Color(overtempBrightness, 0, 0), 0, LED_COUNT);
+}
+
+
+
+//Shift Flash Animation
+bool shiftFlashOn = false;
+uint32_t lastShiftFlash = 0;
+
+void updateFullRingFlash(uint8_t r, uint8_t g, uint8_t b, uint32_t now, uint32_t flashinterval = 100)
+{
+  if ((uint32_t)(now - lastShiftFlash) >= flashinterval)
+  {
+    lastShiftFlash = now;
+    shiftFlashOn = !shiftFlashOn;
+
+    if (shiftFlashOn)
+    {
+      ring.fill(ring.Color(r, g, b), 0, LED_COUNT);
+    }
+    else
+    {
+      ring.clear();
+    }
+  }
+}
+
+void resetShiftFlash()
+{
+  shiftFlashOn = false;
+  lastShiftFlash = 0;
+}
+
+int lastOilTemp = -1;
+
+void updateOilWarmingAnimation(int oilTemp)
+{
+  for (int i = 0; i < LED_COUNT; i++)
+  {
+    // Turn LEDs off from left to right
+    if (i < oilTemp)
+    {
+      ring.setPixelColor(i, 0, 0, 0);
+    }
+    else
+    {
+      ring.setPixelColor(i, 255, 0, 0);
+    }
+  }
+}
+
+
 
 // ================================================================
 // SETUP
@@ -467,6 +591,8 @@ void setup()
   ring.begin(); 
   ring.setBrightness(30); // Set global brightness for the whole strip 0-255  
   ring.show();
+
+  testAnimation();
 }
 
 
@@ -481,54 +607,81 @@ void loop()
 {
   uint32_t now = millis();
 
-
-  ring.fill(ring.Color(255, 0, 0), 0, 24);
-  ring.show();
-  delay(200);
-  
-  ring.fill(ring.Color(0, 0, 255), 0, 24);
-  ring.show();
-  delay(200);
-
-  for(int i=0;i <= 21;i++)
-    {
-    ring.setPixelColor(i, ring.Color(255,0,0,0));
-    ring.show();
-    delay(10);
-    }
-    
-
-  for(int i=0;i <= 21;i++)
-    {
-    ring.setPixelColor(i, ring.Color(0,0,255,0));
-    ring.show();
-    delay(10);
-    }
-  
-    
-  
-
-  // ------------------------------------------------
-  // Poll one PID
-  // ------------------------------------------------
-
+  // Poll one PID at a time
   if ((now - lastRequest) >= REQUEST_INTERVAL_MS)
   {
     lastRequest = now;
-
     readNextPID();
   }
 
 
-  // ------------------------------------------------
-  // Print complete dataset once per second
-  // ------------------------------------------------
-
-  if ((now - lastPrint) >= 10)
+  // Print complete dataset at 10Hz
+  if ((now - lastPrint) >= 100)
   {
     lastPrint = now;
-
     printData();
   }
 
+
+  // Oil temp animation
+  if(!data.oilValid)
+  {
+    data.oilWarming = false;
+    data.oilOvertemp = false;
+    ring.clear();
+  }
+  else if (data.oilValid)
+  {
+    // Pulse LED ring on overtemp as a warning
+    if (data.oilC >= 125)
+    {
+      data.oilOvertemp = true;
+      data.oilWarming = false;
+      updateOvertempAnimation(now);
+    }
+    //Animate increasing redline with inreasing temp
+    else if (data.oilC <= OPERATING_TEMP)
+    {
+      data.oilOvertemp = false;
+      data.oilWarming = true;
+      //int oilTempScaled = round(map(data.oilC, 0, OPERATING_TEMP, 0, LED_COUNT));
+      int oilTempScaled = constrain((long)data.oilC * LED_COUNT / OPERATING_TEMP, 0, LED_COUNT);
+      updateOilWarmingAnimation(oilTempScaled);
+    } 
+    else
+    {
+      data.oilOvertemp = false;
+      data.oilWarming = false;
+      ring.clear();
+    }
+  }
+
+  // Shift indicator flash animation
+  if (data.rpmValid && !data.oilWarming && !data.oilOvertemp)
+  {
+    if (data.rpm > 7200)
+    {
+      updateFullRingFlash(0, 0, 255, now, 100);
+    }
+    else if (data.rpm > 6900)
+    {
+      ring.fill(ring.Color(255, 0, 0), 0, LED_COUNT);
+      resetShiftFlash();
+    }
+    else if (data.rpm > 6500)
+    {
+      ring.fill(ring.Color(0, 255, 0), 0, LED_COUNT);
+      resetShiftFlash();
+    } 
+    else
+    {
+      ring.clear();
+      resetShiftFlash();
+    }
+  }
+  else if (!data.oilValid && !data.rpmValid)
+  {
+    ring.clear();
+  }
+ring.show();
 }
