@@ -390,6 +390,23 @@ void printData()
     "C",
     data.oilValid);
 
+  if (!data.oilValid)
+  {
+    Serial.println("Oil Temperature Unknown");
+  }
+  else if (data.oilWarming)
+  {
+    Serial.println("Oil Warming...");
+  }
+  else if (!data.oilWarming && data.oilValid && !data.oilOvertemp)
+  {
+    Serial.println("Oil At Operating Temperature");
+  }
+  else if (data.oilOvertemp)
+  {
+    Serial.println("OIL OVERTEMP!!");
+  }
+
   Serial.println("================================");
 }
 
@@ -435,17 +452,17 @@ void testAnimation()
 {
   ring.fill(ring.Color(255, 0, 0), 0, LED_COUNT);
   ring.show();
-  delay(200);
+  delay(500);
   
   ring.fill(ring.Color(0, 0, 255), 0, LED_COUNT);
   ring.show();
-  delay(200);
+  delay(500);
 
   for(int i=0;i < LED_COUNT;i++)
   {
     ring.setPixelColor(i, ring.Color(255,0,0));
     ring.show();
-    delay(10);
+    delay(30);
   }
     
 
@@ -453,21 +470,22 @@ void testAnimation()
   {
     ring.setPixelColor(i, ring.Color(0,0,255));
     ring.show();
-    delay(10);
+    delay(30);
   }
 
   for (int brightness = 0; brightness <= 255; brightness++)
   {
     ring.fill(ring.Color(brightness, 0, 0), 0, LED_COUNT);
     ring.show();
-    delay(1);
+    delay(4);
   }
   for (int brightness = 255; brightness >= 0; brightness--)
   {
     ring.fill(ring.Color(brightness, 0, 0), 0, LED_COUNT);
     ring.show();
-    delay(1);
+    delay(4);
   }
+  delay(500);
 }
 
 
@@ -565,7 +583,6 @@ void setup()
   pinMode(PIN_CAN_BOOSTEN, OUTPUT);
   digitalWrite(PIN_CAN_BOOSTEN, true);
 
-  /*
   // ND3 OBD-II CAN bus is 500 kbit/s.
   if (!CAN.begin(500000))
   {
@@ -577,8 +594,7 @@ void setup()
 
   Serial.println("CAN initialized at 500 kbit/s");
   Serial.println("Starting PID polling...");
-  */
-
+  
   clearData();
 
   //Disable board NeoPixel
@@ -606,7 +622,7 @@ uint32_t lastPrint = 0;
 void loop()
 {
   uint32_t now = millis();
-
+  
   // Poll one PID at a time
   if ((now - lastRequest) >= REQUEST_INTERVAL_MS)
   {
@@ -621,7 +637,6 @@ void loop()
     lastPrint = now;
     printData();
   }
-
 
   // Oil temp animation
   if(!data.oilValid)
