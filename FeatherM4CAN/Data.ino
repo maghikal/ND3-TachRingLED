@@ -7,14 +7,16 @@
 void clearData()
 {
   data.rpm = 0;
+  data.speed = 0;
   data.gearStatus = 0;
   data.gearRatio = 0;
   data.oilC = 0;
 
   data.rpmValid = false;
+  data.speedValid = false;
   data.gearValid = false;
   data.oilValid = false;
-  data.oilWarming = true;
+  data.oilWarming = false;
   data.oilOvertemp = false;
 }
 
@@ -59,14 +61,14 @@ void printData()
     data.rpmValid);
   
   printValue(
-    "Gear",
-    data.gearStatus,
+    "Speed",
+    data.speed,
     "",
-    data.gearValid);
+    data.speedValid);
   
   printValue(
-    "Gear Ratio",
-    data.gearRatio,
+    "Gear",
+    data.gearStatus,
     "",
     data.gearValid);
 
@@ -93,4 +95,63 @@ void printData()
     Serial.println("OIL OVERTEMP!!");
   }
   Serial.println("================================");
+}
+
+// ================================================================
+// Read one PID per loop
+// ================================================================
+//
+// Reading one PID at a time to not overwhelm CAN traffic.
+//
+// The sequence is:
+//
+// 0  RPM
+// 1  Oil
+//
+// ================================================================
+
+uint8_t pidIndex = 0;
+
+void readNextPID()
+{
+  switch (pidIndex)
+  {
+    case 0:
+      readRPM();
+      break;
+
+    case 1:
+      readGear();
+      break;
+
+    case 2:
+      readOilTemp();
+      break;
+  }
+
+  pidIndex++;
+
+  if (pidIndex >= 3)
+    pidIndex = 0;
+}
+
+uint32_t lastRequest = 0;
+uint32_t lastPrint = 0;
+
+void updateVehicleData()
+{
+  // Poll one PID at a time
+  if ((now - lastRequest) >= REQUEST_INTERVAL_MS)
+  {
+    lastRequest = now;
+    readNextPID();
+  }
+
+
+  //Print complete dataset at 10Hz
+  if ((now - lastPrint) >= 100)
+  {
+    lastPrint = now;
+    printData();
+  }
 }

@@ -70,9 +70,9 @@ void updateFullRingPulse(uint8_t r = 0, uint8_t g = 0, uint8_t b = 0, uint8_t ma
     pulseDirection = 1;
   }
   ring.fill(ring.Color(
-    round(map(pulseLevel, 0, 255, 0, r)), 
-    round(map(pulseLevel, 0, 255, 0, g)), 
-    round(map(pulseLevel, 0, 255, 0, b))
+    map(pulseLevel, 0, 255, 0, r), 
+    map(pulseLevel, 0, 255, 0, g), 
+    map(pulseLevel, 0, 255, 0, b)
     ), 0, LED_COUNT);
 }
 
@@ -157,13 +157,44 @@ void updateOilWarmingAnimation(int oilTemp)
   }
 }
 
+uint32_t nextRPM = 0;
+uint32_t previousRPM = 0;
+
 void updateShiftPoints()
 {
+  if ((data.gearStatus < GEAR_COUNT && data.gearStatus != 0) || (data.gearStatus == 0 && data.speed > 0))
+  {
+    nextRPM = (data.rpm / gearRatios[data.gearStatus] * gearRatios[data.gearStatus + 1]);
+  }
+  {
+    nextRPM = 0;
+  }
 
+  if ((data.gearStatus > 1) || (data.gearStatus == 0 && data.speed > 0))
+  {
+    previousRPM = (data.rpm / gearRatios[data.gearStatus] * gearRatios[data.gearStatus - 1]);
+  }
+  else
+  {
+    previousRPM = 0;
+  }
+
+  if (nextRPM != 0)
+  {
+    ring.setPixelColor(map(nextRPM, 0, 7500, 6, 21), 255, 255, 0);
+  }
+  if (previousRPM != 0 && previousRPM < 7500)
+  {
+    ring.setPixelColor(map(previousRPM, 0, 7500, 6, 21), 255, 255, 0);
+  }
+
+  ring.setPixelColor(map(data.rpm, 0, 7500, 6, 21), 125, 125, 125);
 }
 
 void updateLEDs()
 {
+  ring.clear();
+
   // Priority 1: Oil overtemperature
   if (data.oilValid && data.oilOvertemp)
   {
@@ -173,7 +204,7 @@ void updateLEDs()
   // Priority 2: Oil warming
   else if (data.oilValid && data.oilWarming)
   {
-    int oilTempScaled = round(map(data.oilC, 0, ENGINE_OPERATING_TEMP, 10, LED_COUNT));
+    int oilTempScaled = map(data.oilC, 0, ENGINE_OPERATING_TEMP, 10, LED_COUNT);
     updateOilWarmingAnimation(oilTempScaled);
   }
 
@@ -187,7 +218,7 @@ void updateLEDs()
     else if (data.rpm > SHIFT_POINT_HIGH)
     {
       resetFullRingFlash();
-      ring.fill(ring.Color(255, 0, 0), 0, LED_COUNT);
+      ring.fill(ring.Color(0, 255, 0), 0, LED_COUNT);
     }
     else if (data.rpm > SHIFT_POINT_MID)
     {
@@ -197,12 +228,11 @@ void updateLEDs()
     else if (data.rpm > SHIFT_POINT_LOW)
     {
       resetFullRingFlash();
-      ring.fill(ring.Color(0, 255, 0), 0, LED_COUNT);
+      ring.fill(ring.Color(255, 0, 0), 0, LED_COUNT);
     }
     else
     {
       resetFullRingFlash();
-      ring.clear();
       updateShiftPoints();
     }
   }

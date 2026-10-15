@@ -332,19 +332,24 @@ void readGear()
   uint8_t A, B, C, D;
   uint8_t speed, unused;
 
-  // Gear ratio is not meaningful when stopped.
-  if (!requestMode01(0x0D, speed, unused) || speed == 0)
+  //Gear ratio is not meaningful when stopped.
+  if (requestMode01(0x0D, speed, unused))
   {
-    data.gearValid = false;
-    return;
+    data.speed = speed;
+    data.speedValid = true;
+  }
+  else
+  {
+    data.speedValid = false;
   }
 
+  uint16_t raw = 0;
   if (requestMode01(0xA4, A, B, C, D))
   {
-    uint16_t raw = ((uint16_t)C << 8) | D;
+    raw = ((uint16_t)C << 8) | D;
 
     data.gearRatio = raw / 1000.0;
-    data.gearStatus = B;
+    data.gearStatus = B / 16;
     data.gearValid = true;
   }
   else
@@ -394,61 +399,3 @@ void readOilTemp()
   }
 }
 
-// ================================================================
-// Read one PID per loop
-// ================================================================
-//
-// Reading one PID at a time to not overwhelm CAN traffic.
-//
-// The sequence is:
-//
-// 0  RPM
-// 1  Oil
-//
-// ================================================================
-
-uint8_t pidIndex = 0;
-
-void readNextPID()
-{
-  switch (pidIndex)
-  {
-    case 0:
-      readRPM();
-      break;
-
-    case 1:
-      readGear();
-      break;
-
-    case 2:
-      readOilTemp();
-      break;
-  }
-
-  pidIndex++;
-
-  if (pidIndex >= 3)
-    pidIndex = 0;
-}
-
-uint32_t lastRequest = 0;
-uint32_t lastPrint = 0;
-
-void updateCANData()
-{
-  // Poll one PID at a time
-  if ((now - lastRequest) >= REQUEST_INTERVAL_MS)
-  {
-    lastRequest = now;
-    readNextPID();
-  }
-
-
-  // Print complete dataset at 10Hz
-  if ((now - lastPrint) >= 100)
-  {
-    lastPrint = now;
-    printData();
-  }
-}

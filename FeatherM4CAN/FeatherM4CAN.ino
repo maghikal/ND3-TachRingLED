@@ -23,31 +23,44 @@ Adafruit_NeoPixel ring(Adafruit_NeoPixel(LED_COUNT, RING_PIN, NEO_GRB + NEO_KHZ8
 
 const uint8_t ENGINE_OPERATING_TEMP = 80;
 const uint8_t ENGINE_OVERTEMP = 120;
-const uint16_t SHIFT_POINT_LOW = 6000;
-const uint16_t SHIFT_POINT_MID = 6600;
-const uint16_t SHIFT_POINT_HIGH = 7000;
-const uint16_t SHIFT_POINT_MAX = 7400;
+const uint16_t SHIFT_POINT_LOW = 5300;
+const uint16_t SHIFT_POINT_MID = 5900;
+const uint16_t SHIFT_POINT_HIGH = 6500;
+const uint16_t SHIFT_POINT_MAX = 7100;
+const uint8_t GEAR_COUNT = 6;
 
 // ================================================================
 // Timing
 // ================================================================
 
-const uint32_t REQUEST_INTERVAL_MS = 50;
-const uint32_t RESPONSE_TIMEOUT_MS = 40;
+const uint8_t REQUEST_INTERVAL_MS = 50;
+const uint8_t RESPONSE_TIMEOUT_MS = 40;
 uint32_t now = 0;
 
 // ================================================================
-// Data structure
+// Data
 // ================================================================
+
+#include <map>
+std::map<int, float> gearRatios {
+    { 1, 5.087 },
+    { 2, 2.991 },
+    { 3, 2.035 },
+    { 4, 1.594 },
+    { 5, 1.286 },
+    { 6, 1.000 },
+};
 
 struct VehicleData
 {
   float rpm;
+  uint8_t speed;
   uint8_t gearStatus;
   float gearRatio;
   float oilC;
 
   bool rpmValid;
+  bool speedValid;
   bool gearValid;
   bool oilValid;
   bool oilWarming;
@@ -55,7 +68,6 @@ struct VehicleData
 };
 
 VehicleData data;
-
 
 // ================================================================
 // SETUP
@@ -81,7 +93,7 @@ void setup()
   //setup ring LED
   pinMode(RING_PIN, OUTPUT);
   ring.begin(); 
-  ring.setBrightness(32); // Set global brightness for the whole strip 0-255  
+  ring.setBrightness(255); // Set global brightness for the whole strip 0-255  
   //ring.show();
 
   //testAnimation();
@@ -107,7 +119,7 @@ void loop()
 {
   now = millis();
   
-  updateCANData();
+  updateVehicleData();
 
   updateLEDs();
 }
