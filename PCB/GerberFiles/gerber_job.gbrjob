@@ -1,7 +1,7 @@
 {
     "Header": {
         "Comment": "All values are metric (mm)",
-        "CreationDate": "2026-09-24T07:49:11Z",
+        "CreationDate": "2026-10-17T05:23:23Z",
         "GenerationSoftware": {
             "Application": "Fusion Electronics",
             "Vendor": "Autodesk",
@@ -13,12 +13,12 @@
         "BoardThickness": 1.6608,
         "LayerNumber": 2,
         "Name": {
-            "ProjectId": "ND3 Tach NeoPixel Ring v18"
+            "ProjectId": "ND3 Tach NeoPixel Ring v31"
         },
         "Owner": "Stefano Campello <stefano@campello.com>",
         "Size": {
-            "X": 115.5,
-            "Y": 115.5
+            "X": 115.417663,
+            "Y": 125.007928
         }
     }
 }
