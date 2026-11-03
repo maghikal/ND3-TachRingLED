@@ -461,7 +461,6 @@ void readOilTemp()
 
     data.oilValid = true;
     data.oilTime = now;
-    data.oilOvertemp = data.oilC >= ENGINE_OVERTEMP;
-    data.oilWarming = data.oilC <= ENGINE_OPERATING_TEMP && !data.oilOvertemp;
+    updateOilFlags();
   }
 }

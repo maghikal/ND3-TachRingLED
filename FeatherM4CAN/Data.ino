@@ -54,6 +54,16 @@ void expireStaleData()
 }
 
 // ================================================================
+// Oil temperature flags
+// ================================================================
+
+void updateOilFlags()
+{
+  data.oilOvertemp = data.oilC >= ENGINE_OVERTEMP;
+  data.oilWarming = data.oilC <= ENGINE_OPERATING_TEMP && !data.oilOvertemp;
+}
+
+// ================================================================
 // Print a floating point value
 // ================================================================
 
@@ -191,7 +201,11 @@ uint32_t lastPrint = 0;
 void updateVehicleData()
 {
   // Poll one PID at a time
-  if ((now - lastRequest) >= REQUEST_INTERVAL_MS)
+  if (!canPolling)
+  {
+    updateManualData();
+  }
+  else if ((now - lastRequest) >= REQUEST_INTERVAL_MS)
   {
     lastRequest = now;
     readNextPID();
@@ -201,7 +215,7 @@ void updateVehicleData()
 
 
   //Print complete dataset at 10Hz
-  if ((now - lastPrint) >= 100)
+  if (printEnabled && (now - lastPrint) >= 100)
   {
     lastPrint = now;
     printData();

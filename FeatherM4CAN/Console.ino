@@ -1,0 +1,495 @@
+// ================================================================
+// Serial console
+// ================================================================
+//
+// Line-based commands for bench testing the LED logic without a
+// car. Open the serial monitor at 115200 baud with a newline line
+// ending and type "help".
+//
+// Setting or sweeping a value suspends CAN polling so the PCM
+// can't overwrite it. "can on" resumes polling and clears the
+// manual values.
+//
+// While polling is suspended, every valid value has its timestamp
+// refreshed at MANUAL_REFRESH_MS so expireStaleData() keeps it
+// alive, the same rate a new RPM reading arrives from the car.
+//
+// ================================================================
+
+const uint8_t MANUAL_REFRESH_MS = 50;
+uint32_t lastManualRefresh = 0;
+
+// Field indexes. Plain ints rather than an enum so the Arduino
+// generated prototypes compile.
+const uint8_t FIELD_RPM   = 0;
+const uint8_t FIELD_SPEED = 1;
+const uint8_t FIELD_GEAR  = 2;
+const uint8_t FIELD_RATIO = 3;
+const uint8_t FIELD_OIL   = 4;
+const uint8_t FIELD_COUNT = 5;
+
+const char *fieldNames[FIELD_COUNT] = { "rpm", "speed", "gear", "ratio", "oil" };
+
+// once   - start to end, then hold end
+// loop   - start to end, jump back to start, repeat
+// bounce - start to end to start, repeat
+const uint8_t SWEEP_ONCE   = 0;
+const uint8_t SWEEP_LOOP   = 1;
+const uint8_t SWEEP_BOUNCE = 2;
+
+struct Sweep
+{
+  bool active;
+  float start;
+  float end;
+  uint32_t duration;
+  uint32_t startTime;
+  uint8_t mode;
+};
+
+Sweep sweeps[FIELD_COUNT];
+
+const uint8_t CONSOLE_LINE_MAX = 80;
+char consoleLine[CONSOLE_LINE_MAX];
+uint8_t consoleLength = 0;
+
+
+// ================================================================
+// Read console input
+// ================================================================
+//
+// Non-blocking: collects characters until CR or LF, then runs the
+// line. Called every loop.
+//
+// ================================================================
+
+void updateConsole()
+{
+  while (Serial.available())
+  {
+    char c = Serial.read();
+
+    if (c == '\r' || c == '\n')
+    {
+      if (consoleLength > 0)
+      {
+        consoleLine[consoleLength] = '\0';
+        runCommand(consoleLine);
+        consoleLength = 0;
+      }
+    }
+    else if (consoleLength < CONSOLE_LINE_MAX - 1)
+    {
+      consoleLine[consoleLength++] = c;
+    }
+  }
+}
+
+
+// ================================================================
+// Manual data
+// ================================================================
+//
+// Called from updateVehicleData() in place of CAN polling.
+//
+// ================================================================
+
+void updateManualData()
+{
+  if ((now - lastManualRefresh) >= MANUAL_REFRESH_MS)
+  {
+    lastManualRefresh = now;
+
+    if (data.rpmValid)   data.rpmTime = now;
+    if (data.speedValid) data.speedTime = now;
+    if (data.gearValid)  data.gearTime = now;
+    if (data.oilValid)   data.oilTime = now;
+  }
+
+  // In field order, so a ratio sweep overrides the ratio a gear
+  // sweep sets.
+  for (uint8_t i = 0; i < FIELD_COUNT; i++)
+  {
+    if (sweeps[i].active)
+      updateSweep(i);
+  }
+}
+
+void updateSweep(uint8_t field)
+{
+  Sweep &s = sweeps[field];
+  uint32_t elapsed = now - s.startTime;
+  float progress = 1.0;
+
+  if (s.duration > 0)
+  {
+    switch (s.mode)
+    {
+      case SWEEP_ONCE:
+        progress = min(1.0f, (float)elapsed / s.duration);
+        break;
+
+      case SWEEP_LOOP:
+        progress = (float)(elapsed % s.duration) / s.duration;
+        break;
+
+      case SWEEP_BOUNCE:
+      {
+        uint32_t phase = elapsed % (2 * s.duration);
+        progress = (float)phase / s.duration;
+
+        if (progress > 1.0)
+          progress = 2.0 - progress;
+        break;
+      }
+    }
+  }
+
+  setField(field, s.start + (s.end - s.start) * progress);
+
+  if (s.mode == SWEEP_ONCE && elapsed >= s.duration)
+  {
+    s.active = false;
+    Serial.print("Sweep ");
+    Serial.print(fieldNames[field]);
+    Serial.println(" done");
+  }
+}
+
+// Stores a value as if it had just been read from the PCM.
+void setField(uint8_t field, float value)
+{
+  switch (field)
+  {
+    case FIELD_RPM:
+      data.rpm = constrain(value, 0, 16383.75);
+      data.rpmValid = true;
+      data.rpmTime = lastManualRefresh;
+      break;
+
+    case FIELD_SPEED:
+      data.speed = constrain(lroundf(value), 0, 255);
+      data.speedValid = true;
+      data.speedTime = lastManualRefresh;
+      break;
+
+    // Also sets the ratio the car would report in that gear.
+    case FIELD_GEAR:
+    {
+      uint8_t gear = constrain(lroundf(value), 0, 15);
+      auto ratio = gearRatios.find(gear);
+
+      data.gearStatus = gear;
+      data.gearRatio = (ratio != gearRatios.end()) ? ratio->second : 0;
+      data.gearValid = true;
+      data.gearTime = lastManualRefresh;
+      break;
+    }
+
+    case FIELD_RATIO:
+      data.gearRatio = value;
+      data.gearValid = true;
+      data.gearTime = lastManualRefresh;
+      break;
+
+    case FIELD_OIL:
+      data.oilC = value;
+      data.oilValid = true;
+      data.oilTime = lastManualRefresh;
+      updateOilFlags();
+      break;
+  }
+}
+
+void invalidateField(uint8_t field)
+{
+  sweeps[field].active = false;
+
+  switch (field)
+  {
+    case FIELD_RPM:
+      data.rpmValid = false;
+      break;
+
+    case FIELD_SPEED:
+      data.speedValid = false;
+      break;
+
+    case FIELD_GEAR:
+    case FIELD_RATIO:
+      data.gearValid = false;
+      break;
+
+    case FIELD_OIL:
+      data.oilValid = false;
+      data.oilWarming = false;
+      data.oilOvertemp = false;
+      break;
+  }
+}
+
+
+// ================================================================
+// CAN polling control
+// ================================================================
+
+void suspendCANPolling()
+{
+  if (!canPolling)
+    return;
+
+  canPolling = false;
+  lastManualRefresh = now;
+  Serial.println("CAN polling suspended");
+}
+
+void resumeCANPolling()
+{
+  stopAllSweeps();
+  clearData();
+
+  // Give the PCM a full watchdog period before re-initializing.
+  lastCANResponse = now;
+  canPolling = true;
+  Serial.println("CAN polling resumed");
+}
+
+void stopAllSweeps()
+{
+  for (uint8_t i = 0; i < FIELD_COUNT; i++)
+    sweeps[i].active = false;
+}
+
+
+// ================================================================
+// Commands
+// ================================================================
+
+void printHelp()
+{
+  Serial.println();
+  Serial.println("Commands:");
+  Serial.println("  help                                   this list");
+  Serial.println("  status                                 print data once");
+  Serial.println("  print on|off                           10 Hz data printout");
+  Serial.println("  can on|off                             resume/suspend CAN polling");
+  Serial.println("  set <field> <value>                    set a value");
+  Serial.println("  sweep <field> <start> <end> <ms> [once|loop|bounce]");
+  Serial.println("                                         ramp a value over ms");
+  Serial.println("  stop [field|all]                       stop sweeps, hold values");
+  Serial.println("  invalid <field|all>                    mark value(s) N/A");
+  Serial.println("  clear                                  stop sweeps, clear all data");
+  Serial.println();
+  Serial.println("Fields: rpm, speed (km/h), gear (0 = neutral), ratio, oil (C)");
+  Serial.println("set/sweep suspend CAN polling. Setting gear also sets ratio.");
+  Serial.println();
+}
+
+// Returns the field index, or -1 if the name is unknown.
+int parseField(const char *name)
+{
+  if (name == NULL)
+    return -1;
+
+  for (uint8_t i = 0; i < FIELD_COUNT; i++)
+  {
+    if (strcasecmp(name, fieldNames[i]) == 0)
+      return i;
+  }
+
+  return -1;
+}
+
+bool parseNumber(const char *text, float &value)
+{
+  if (text == NULL)
+    return false;
+
+  char *end;
+  value = strtof(text, &end);
+
+  return end != text && *end == '\0';
+}
+
+void printUnknownField(const char *name)
+{
+  Serial.print("Unknown field: ");
+  Serial.println(name ? name : "(none)");
+  Serial.println("Fields: rpm, speed, gear, ratio, oil");
+}
+
+void runCommand(char *line)
+{
+  char *command = strtok(line, " \t");
+
+  if (command == NULL)
+    return;
+
+  char *arg1 = strtok(NULL, " \t");
+  char *arg2 = strtok(NULL, " \t");
+  char *arg3 = strtok(NULL, " \t");
+  char *arg4 = strtok(NULL, " \t");
+  char *arg5 = strtok(NULL, " \t");
+
+  if (strcasecmp(command, "help") == 0 || strcmp(command, "?") == 0)
+  {
+    printHelp();
+  }
+  else if (strcasecmp(command, "status") == 0)
+  {
+    printData();
+    Serial.print("CAN polling: ");
+    Serial.println(canPolling ? "on" : "off");
+  }
+  else if (strcasecmp(command, "print") == 0)
+  {
+    if (arg1 && strcasecmp(arg1, "on") == 0)
+      printEnabled = true;
+    else if (arg1 && strcasecmp(arg1, "off") == 0)
+      printEnabled = false;
+    else
+      Serial.println("Usage: print on|off");
+  }
+  else if (strcasecmp(command, "can") == 0)
+  {
+    if (arg1 && strcasecmp(arg1, "on") == 0)
+      resumeCANPolling();
+    else if (arg1 && strcasecmp(arg1, "off") == 0)
+      suspendCANPolling();
+    else
+      Serial.println("Usage: can on|off");
+  }
+  else if (strcasecmp(command, "set") == 0)
+  {
+    int field = parseField(arg1);
+    float value;
+
+    if (field < 0)
+    {
+      printUnknownField(arg1);
+    }
+    else if (!parseNumber(arg2, value))
+    {
+      Serial.println("Usage: set <field> <value>");
+    }
+    else
+    {
+      suspendCANPolling();
+      sweeps[field].active = false;
+      setField(field, value);
+
+      Serial.print(fieldNames[field]);
+      Serial.print(" = ");
+      Serial.println(value, 2);
+    }
+  }
+  else if (strcasecmp(command, "sweep") == 0)
+  {
+    int field = parseField(arg1);
+    float start, end, duration;
+    uint8_t mode = SWEEP_ONCE;
+    bool modeOk = true;
+
+    if (arg5 == NULL || strcasecmp(arg5, "once") == 0)
+      mode = SWEEP_ONCE;
+    else if (strcasecmp(arg5, "loop") == 0)
+      mode = SWEEP_LOOP;
+    else if (strcasecmp(arg5, "bounce") == 0)
+      mode = SWEEP_BOUNCE;
+    else
+      modeOk = false;
+
+    if (field < 0)
+    {
+      printUnknownField(arg1);
+    }
+    else if (!parseNumber(arg2, start) || !parseNumber(arg3, end) ||
+             !parseNumber(arg4, duration) || duration < 0 || !modeOk)
+    {
+      Serial.println("Usage: sweep <field> <start> <end> <ms> [once|loop|bounce]");
+    }
+    else
+    {
+      suspendCANPolling();
+
+      Sweep &s = sweeps[field];
+      s.start = start;
+      s.end = end;
+      s.duration = (uint32_t)duration;
+      s.startTime = now;
+      s.mode = mode;
+      s.active = true;
+      setField(field, start);
+
+      Serial.print("Sweeping ");
+      Serial.print(fieldNames[field]);
+      Serial.print(" ");
+      Serial.print(start, 2);
+      Serial.print(" -> ");
+      Serial.print(end, 2);
+      Serial.print(" over ");
+      Serial.print(s.duration);
+      Serial.println(" ms");
+    }
+  }
+  else if (strcasecmp(command, "stop") == 0)
+  {
+    if (arg1 == NULL || strcasecmp(arg1, "all") == 0)
+    {
+      stopAllSweeps();
+      Serial.println("All sweeps stopped");
+    }
+    else
+    {
+      int field = parseField(arg1);
+
+      if (field < 0)
+      {
+        printUnknownField(arg1);
+      }
+      else
+      {
+        sweeps[field].active = false;
+        Serial.print("Sweep ");
+        Serial.print(fieldNames[field]);
+        Serial.println(" stopped");
+      }
+    }
+  }
+  else if (strcasecmp(command, "invalid") == 0)
+  {
+    if (arg1 && strcasecmp(arg1, "all") == 0)
+    {
+      for (uint8_t i = 0; i < FIELD_COUNT; i++)
+        invalidateField(i);
+      Serial.println("All values N/A");
+    }
+    else
+    {
+      int field = parseField(arg1);
+
+      if (field < 0)
+      {
+        printUnknownField(arg1);
+      }
+      else
+      {
+        invalidateField(field);
+        Serial.print(fieldNames[field]);
+        Serial.println(" = N/A");
+      }
+    }
+  }
+  else if (strcasecmp(command, "clear") == 0)
+  {
+    stopAllSweeps();
+    clearData();
+    Serial.println("Data cleared");
+  }
+  else
+  {
+    Serial.print("Unknown command: ");
+    Serial.println(command);
+    Serial.println("Type \"help\" for a list of commands");
+  }
+}

@@ -53,6 +53,12 @@ uint32_t now = 0;
 uint32_t lastCANResponse = 0;
 uint32_t lastCANReset = 0;
 
+// Cleared by the serial console (Console.ino) to test the display
+// with manual values instead of PCM responses.
+bool canPolling = true;
+// 10 Hz data printout, toggled by the console "print" command.
+bool printEnabled = true;
+
 // ================================================================
 // Data
 // ================================================================
@@ -136,6 +142,7 @@ void setup()
   }
   Serial.println("CAN initialized at 500 kbit/s");
   Serial.println("Starting PID polling...");
+  Serial.println("Type \"help\" for console commands");
 }
 
 
@@ -146,7 +153,10 @@ void loop()
 {
   now = millis();
 
-  checkCANWatchdog();
+  updateConsole();
+
+  if (canPolling)
+    checkCANWatchdog();
 
   updateVehicleData();
 
