@@ -1,34 +1,31 @@
 // ================================================================
-// Send standard Mode 01 PID request
+// CAN initialization
 // ================================================================
 //
-// Example:
+// ND3 OBD-II CAN bus is 500 kbit/s.
 //
-//   sendMode01(0x0C)
-//
-// sends:
-//
-//   7DF  02 01 0C 00 00 00 00 00
+// Only accept frames from the PCM so unrelated traffic can't
+// fill the RX FIFO and push out the responses we need.
 //
 // ================================================================
+
+const uint32_t PCM_RESPONSE_ID   = 0x7E8;
+
+const uint32_t PCM_REQUEST_ID    = 0x7E0;
 
 const uint32_t OBD_FUNCTIONAL_ID = 0x7DF;
 
-void sendMode01(uint8_t pid)
+bool initCAN()
 {
-  CAN.beginPacket(OBD_FUNCTIONAL_ID);
+  if (!CAN.begin(500000))
+    return false;
 
-  CAN.write(0x02);       // Number of following bytes
-  CAN.write(0x01);       // Mode 01
-  CAN.write(pid);
-  // Padding
-  CAN.write(0x00);
-  CAN.write(0x00);
-  CAN.write(0x00);
-  CAN.write(0x00);
-  CAN.write(0x00);
+  CAN.filter(PCM_RESPONSE_ID, 0x7FF);
 
-  CAN.endPacket();
+  // Give the PCM a full watchdog period to answer.
+  lastCANResponse = millis();
+
+  return true;
 }
 
 
@@ -62,8 +59,64 @@ void checkCANWatchdog()
 
   CAN.end();
 
-  if (!CAN.begin(500000))
+  if (!initCAN())
     Serial.println("CAN re-initialization FAILED!");
+}
+
+
+// ================================================================
+// Discard received frames
+// ================================================================
+//
+// Called before every request so a late response to a previous
+// request can't be mistaken for the answer to this one.
+//
+// ================================================================
+
+void discardPacket()
+{
+  while (CAN.available())
+    CAN.read();
+}
+
+void drainRx()
+{
+  while (CAN.parsePacket())
+    discardPacket();
+}
+
+
+// ================================================================
+// Send standard Mode 01 PID request
+// ================================================================
+//
+// Example:
+//
+//   sendMode01(0x0C)
+//
+// sends:
+//
+//   7DF  02 01 0C 00 00 00 00 00
+//
+// ================================================================
+
+void sendMode01(uint8_t pid)
+{
+  drainRx();
+
+  CAN.beginPacket(OBD_FUNCTIONAL_ID);
+
+  CAN.write(0x02);       // Number of following bytes
+  CAN.write(0x01);       // Mode 01
+  CAN.write(pid);
+  // Padding
+  CAN.write(0x00);
+  CAN.write(0x00);
+  CAN.write(0x00);
+  CAN.write(0x00);
+  CAN.write(0x00);
+
+  CAN.endPacket();
 }
 
 
@@ -77,12 +130,10 @@ void checkCANWatchdog()
 //
 // ================================================================
 
-const uint32_t PCM_RESPONSE_ID   = 0x7E8;
-
-const uint32_t PCM_REQUEST_ID    = 0x7E0;
-
 void sendMode22(uint8_t pidHigh, uint8_t pidLow)
 {
+  drainRx();
+
   CAN.beginPacket(PCM_REQUEST_ID);
 
   CAN.write(0x03);       // 3 bytes follow
@@ -99,30 +150,32 @@ void sendMode22(uint8_t pidHigh, uint8_t pidLow)
 }
 
 
-// ================================================================
-// Receive CAN response
-// ================================================================
-//
-// Returns true if a valid response from 0x7E8 is received.
-//
-// The data bytes are copied into response[].
-//
-// ================================================================
-
 // ------------------------------------------------
 // Get CAN Response
 //
-// Reads a single CAN frame from the PCM.
+// Waits for a PCM frame whose bytes after the
+// ISO-TP length byte start with match[].
+//
+//   Mode 01:  match = 41 PID
+//   Mode 22:  match = 62 PIDH PIDL
+//
+// Frames that don't match (e.g. a late reply to an
+// earlier request) are skipped, not treated as a
+// failure.
 //
 // Returns:
-//   true  - PCM response received
-//   false - Timeout
+//   true  - Matching PCM response received
+//   false - Timeout or negative response
 //
 // Response includes the ISO-TP length byte.
 //
 // ------------------------------------------------
 
-bool getResponse(uint8_t *response, uint8_t &length)
+bool getResponse(
+  const uint8_t *match,
+  uint8_t matchLength,
+  uint8_t *response,
+  uint8_t &length)
 {
   uint32_t start = millis();
 
@@ -133,23 +186,10 @@ bool getResponse(uint8_t *response, uint8_t &length)
     if (!packetSize)
       continue;
 
-    // Ignore extended frames.
-    if (CAN.packetExtended())
+    // Ignore extended frames and frames not from the PCM.
+    if (CAN.packetExtended() || CAN.packetId() != PCM_RESPONSE_ID)
     {
-      while (CAN.available())
-        CAN.read();
-
-      continue;
-    }
-
-    uint32_t id = CAN.packetId();
-
-    // Ignore frames that are not from the PCM.
-    if (id != PCM_RESPONSE_ID)
-    {
-      while (CAN.available())
-        CAN.read();
-
+      discardPacket();
       continue;
     }
 
@@ -166,6 +206,23 @@ bool getResponse(uint8_t *response, uint8_t &length)
 
     // Reject empty or invalid-length frames.
     if (count == 0 || count != packetSize)
+      continue;
+
+    // Negative response:
+    //   03 7F SID NRC
+    // NRC 78 = response pending, keep waiting.
+    if (count >= 4 && response[1] == 0x7F && response[2] == match[0] - 0x40)
+    {
+      if (response[3] == 0x78)
+        continue;
+
+      return false;
+    }
+
+    if (count < 1 + matchLength)
+      continue;
+
+    if (memcmp(&response[1], match, matchLength) != 0)
       continue;
 
     length = count;
@@ -185,7 +242,8 @@ bool getResponse(uint8_t *response, uint8_t &length)
 // Standard positive response:
 //   04 41 PID A B
 // Used by:
-//   PID 04 41 - RPM
+//   PID 01 0C - RPM
+//   PID 01 0D - Speed (B unused)
 //
 // ================================================================
 
@@ -193,31 +251,21 @@ bool requestMode01(uint8_t pid, uint8_t &A, uint8_t &B)
 {
   uint8_t response[8];
   uint8_t length;
+  const uint8_t match[] = { 0x41, pid };
 
   sendMode01(pid);
 
-  if (!getResponse(response, length))
+  if (!getResponse(match, sizeof(match), response, length))
     return false;
 
   // Minimum expected:
-  //   04 41 PID A
+  //   04 41 PID A B
 
   if (length < 5)
     return false;
 
-  // Positive Mode 01 response.
-  if (response[1] != 0x41)
-    return false;
-
-  if (response[2] != pid)
-    return false;
-
   A = response[3];
-
-  if (length >= 5)
-    B = response[4];
-  else
-    B = 0;
+  B = response[4];
 
   return true;
 }
@@ -241,23 +289,17 @@ bool requestMode01(
 {
   uint8_t response[8];
   uint8_t length;
+  const uint8_t match[] = { 0x41, pid };
 
   sendMode01(pid);
 
-  if (!getResponse(response, length))
+  if (!getResponse(match, sizeof(match), response, length))
     return false;
 
   // Minimum expected:
   //   06 41 PID A B C D
 
   if (length < 7)
-    return false;
-
-  // Positive Mode 01 response.
-  if (response[1] != 0x41)
-    return false;
-
-  if (response[2] != pid)
     return false;
 
   A = response[3];
@@ -276,7 +318,7 @@ bool requestMode01(
 // Response:
 //   04 62 13 10 A B
 // Used by:
-//   PID 04 62 - Oil Temp
+//   PID 22 13 10 - Oil Temp
 //
 // ================================================================
 
@@ -288,26 +330,15 @@ bool requestMode22(
 {
   uint8_t response[8];
   uint8_t length;
+  // Positive Mode 22 response: 62 = 22 + 0x40
+  const uint8_t match[] = { 0x62, pidHigh, pidLow };
 
   sendMode22(pidHigh, pidLow);
 
-  if (!getResponse(response, length))
+  if (!getResponse(match, sizeof(match), response, length))
     return false;
 
   if (length < 6)
-    return false;
-
-  // Positive Mode 22 response:
-  //
-  // 62 = 22 + 0x40
-  //
-  if (response[1] != 0x62)
-    return false;
-
-  if (response[2] != pidHigh)
-    return false;
-
-  if (response[3] != pidLow)
     return false;
 
   A = response[4];
@@ -319,6 +350,12 @@ bool requestMode22(
 
 // ================================================================
 // PID functions
+// ================================================================
+//
+// On success each function stores the value and its timestamp.
+// On failure the last good value is kept; expireStaleData()
+// invalidates it once it is older than DATA_STALE_MS.
+//
 // ================================================================
 
 
@@ -337,10 +374,25 @@ void readRPM()
 
     data.rpm = raw / 4.0;
     data.rpmValid = true;
+    data.rpmTime = now;
   }
-  else
+}
+
+
+// ------------------------------------------------
+// Vehicle speed - 01 0D
+// Speed = A (km/h)
+// ------------------------------------------------
+
+void readSpeed()
+{
+  uint8_t speed, unused;
+
+  if (requestMode01(0x0D, speed, unused))
   {
-    data.rpmValid = false;
+    data.speed = speed;
+    data.speedValid = true;
+    data.speedTime = now;
   }
 }
 
@@ -359,38 +411,22 @@ void readRPM()
 //
 // Note:
 //   Ratio is undefined when vehicle speed is 0.
-//   Gate detection on PID 01 0D > 0.
+//   updateShiftPoints() gates on speed > 0.
 //
 // ------------------------------------------------
 
 void readGear()
 {
   uint8_t A, B, C, D;
-  uint8_t speed, unused;
 
-  //Gear ratio is not meaningful when stopped.
-  if (requestMode01(0x0D, speed, unused))
-  {
-    data.speed = speed;
-    data.speedValid = true;
-  }
-  else
-  {
-    data.speedValid = false;
-  }
-
-  uint16_t raw = 0;
   if (requestMode01(0xA4, A, B, C, D))
   {
-    raw = ((uint16_t)C << 8) | D;
+    uint16_t raw = ((uint16_t)C << 8) | D;
 
     data.gearRatio = raw / 1000.0;
     data.gearStatus = B / 16;
     data.gearValid = true;
-  }
-  else
-  {
-    data.gearValid = false;
+    data.gearTime = now;
   }
 }
 
@@ -424,14 +460,8 @@ void readOilTemp()
       (raw / 100.0) - 40.0;
 
     data.oilValid = true;
+    data.oilTime = now;
     data.oilOvertemp = data.oilC >= ENGINE_OVERTEMP;
     data.oilWarming = data.oilC <= ENGINE_OPERATING_TEMP && !data.oilOvertemp;
   }
-  else
-  {
-    data.oilValid = false;
-    data.oilWarming = false;
-    data.oilOvertemp = false;
-  }
 }
-

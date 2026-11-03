@@ -28,13 +28,25 @@ const uint16_t SHIFT_POINT_MID = 5900;
 const uint16_t SHIFT_POINT_HIGH = 6500;
 const uint16_t SHIFT_POINT_MAX = 7100;
 const uint8_t GEAR_COUNT = 6;
+// Keep showing the last gear in neutral above this speed.
+// OBD speed is km/h: 32 km/h = 20 mph.
+const uint8_t NEUTRAL_HOLD_MIN_KMH = 32;
+// Starting estimate of engine RPM per km/h at a 1.000 gear ratio:
+// 2.866 final drive, 205/45R17 (1.936 m circumference).
+//   (1000 / 60) / 1.936 * 2.866 = 24.7
+// Refined at runtime while driving in gear.
+const float RPM_PER_KMH_PER_RATIO = 24.7;
 
 // ================================================================
 // Timing
 // ================================================================
 
-const uint8_t REQUEST_INTERVAL_MS = 50;
+// One request per slot. RPM gets every other slot, so it updates
+// every 2 * REQUEST_INTERVAL_MS (20 Hz).
+const uint8_t REQUEST_INTERVAL_MS = 25;
 const uint8_t RESPONSE_TIMEOUT_MS = 40;
+// Keep showing the last good value through a few missed responses.
+const uint16_t DATA_STALE_MS = 500;
 // Re-initialize the CAN controller if no PCM response for this long.
 const uint16_t CAN_WATCHDOG_MS = 2000;
 uint32_t now = 0;
@@ -69,6 +81,12 @@ struct VehicleData
   bool oilValid;
   bool oilWarming;
   bool oilOvertemp;
+
+  // millis() of the last good response
+  uint32_t rpmTime;
+  uint32_t speedTime;
+  uint32_t gearTime;
+  uint32_t oilTime;
 };
 
 VehicleData data;
@@ -103,13 +121,18 @@ void setup()
   testAnimation();
   bootAnimation();
 
-  // ND3 OBD-II CAN bus is 500 kbit/s.
-  if (!CAN.begin(500000))
+  // Blink the ring magenta and keep retrying if CAN won't start.
+  while (!initCAN())
   {
-    Serial.println("CAN initialization FAILED!");
+    Serial.println("CAN initialization FAILED! Retrying...");
 
-    while (1)
-      delay(100);
+    ring.fill(ring.Color(255, 0, 255), 0, LED_COUNT);
+    ring.show();
+    delay(500);
+
+    ring.clear();
+    ring.show();
+    delay(500);
   }
   Serial.println("CAN initialized at 500 kbit/s");
   Serial.println("Starting PID polling...");

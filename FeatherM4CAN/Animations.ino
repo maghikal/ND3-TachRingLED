@@ -53,22 +53,25 @@ uint32_t lastPulseUpdate = 0;
 
 void updateFullRingPulse(uint8_t r = 0, uint8_t g = 0, uint8_t b = 0, uint8_t maxLevel = 255, uint8_t stepInterval = 1.0)
 {
-  if ((now - lastPulseUpdate) < stepInterval)
-    return;
-
-  lastPulseUpdate = now;
-  pulseLevel += pulseDirection;
-
-  if (pulseLevel >= maxLevel)
+  // Only step the level on the interval, but always draw it:
+  // updateLEDs() clears the ring every frame.
+  if ((now - lastPulseUpdate) >= stepInterval)
   {
-    pulseLevel = maxLevel;
-    pulseDirection = -1;
+    lastPulseUpdate = now;
+    pulseLevel += pulseDirection;
+
+    if (pulseLevel >= maxLevel)
+    {
+      pulseLevel = maxLevel;
+      pulseDirection = -1;
+    }
+    else if (pulseLevel <= 0)
+    {
+      pulseLevel = 0;
+      pulseDirection = 1;
+    }
   }
-  else if (pulseLevel <= 0)
-  {
-    pulseLevel = 0;
-    pulseDirection = 1;
-  }
+
   ring.fill(ring.Color(
     map(pulseLevel, 0, 255, 0, r), 
     map(pulseLevel, 0, 255, 0, g), 
@@ -141,14 +144,26 @@ void bootAnimation()
 
 int lastOilTemp = -1;
 
-void updateOilWarmingAnimation(int oilTemp)
+// position is how many LEDs are off, counting from LED 0. The
+// fractional part fades the next LED out, so the bar shrinks
+// smoothly instead of stepping one LED at a time.
+void updateOilWarmingAnimation(float position)
 {
+  position = constrain(position, 0, LED_COUNT);
+
+  int fullyOff = (int)position;
+  float fade = position - fullyOff;
+
   for (int i = 0; i < LED_COUNT; i++)
   {
     // Turn LEDs off from left to right
-    if (i < oilTemp)
+    if (i < fullyOff)
     {
       ring.setPixelColor(i, 0, 0, 0);
+    }
+    else if (i == fullyOff)
+    {
+      ring.setPixelColor(i, (uint8_t)(255 * (1.0 - fade)), 0, 0);
     }
     else
     {
@@ -160,23 +175,88 @@ void updateOilWarmingAnimation(int oilTemp)
 uint32_t nextRPM = 0;
 uint32_t previousRPM = 0;
 
+// Gear used for the shift points. Held through neutral (e.g. clutch
+// in mid-shift) until the next gear is detected or speed drops
+// below NEUTRAL_HOLD_MIN_KMH. 0 = no gear to show.
+uint8_t displayGear = 0;
+
+// True while displayGear is being held through neutral.
+bool gearHeld = false;
+
+// Engine RPM per km/h per unit of gear ratio (final drive and tire
+// size). Starts from the stock estimate and is learned while
+// driving in gear, so it tracks the actual tires.
+float rpmPerKmhPerRatio = RPM_PER_KMH_PER_RATIO;
+uint32_t lastLearnRpmTime = 0;
+
+void learnRpmPerKmh()
+{
+  // One sample per new RPM reading, not per LED frame.
+  if (data.rpmTime == lastLearnRpmTime)
+    return;
+
+  lastLearnRpmTime = data.rpmTime;
+
+  if (data.speed < NEUTRAL_HOLD_MIN_KMH || data.rpm < 1000)
+    return;
+
+  float sample = data.rpm / (data.speed * gearRatios[displayGear]);
+
+  // Reject samples from clutch slip or a mis-reported gear.
+  if (sample < RPM_PER_KMH_PER_RATIO * 0.8 || sample > RPM_PER_KMH_PER_RATIO * 1.2)
+    return;
+
+  rpmPerKmhPerRatio += (sample - rpmPerKmhPerRatio) * 0.05;
+}
+
+void updateDisplayGear()
+{
+  if (!data.gearValid || !data.speedValid)
+  {
+    displayGear = 0;
+    gearHeld = false;
+  }
+  // Real gear (1..GEAR_COUNT) while moving; the reported gear is
+  // meaningless when stopped.
+  else if (data.gearStatus >= 1 && data.gearStatus <= GEAR_COUNT && data.speed > 0)
+  {
+    displayGear = data.gearStatus;
+    gearHeld = false;
+    learnRpmPerKmh();
+  }
+  else if (data.speed < NEUTRAL_HOLD_MIN_KMH)
+  {
+    displayGear = 0;
+    gearHeld = false;
+  }
+  // Otherwise neutral above the hold speed: keep the last gear.
+  else if (displayGear != 0)
+  {
+    gearHeld = true;
+  }
+}
+
 void updateShiftPoints()
 {
-  if ((data.gearStatus < GEAR_COUNT && data.gearStatus != 0) || (data.gearStatus == 0 && data.speed > 0))
-  {
-    nextRPM = (data.rpm / gearRatios[data.gearStatus] * gearRatios[data.gearStatus + 1]);
-  }
-  {
-    nextRPM = 0;
-  }
+  nextRPM = 0;
+  previousRPM = 0;
 
-  if ((data.gearStatus > 1) || (data.gearStatus == 0 && data.speed > 0))
+  if (displayGear != 0)
   {
-    previousRPM = (data.rpm / gearRatios[data.gearStatus] * gearRatios[data.gearStatus - 1]);
-  }
-  else
-  {
-    previousRPM = 0;
+    // In gear the engine RPM matches the road speed. In neutral it
+    // doesn't, so use the RPM the held gear would have at this speed.
+    float gearRPM = data.rpm;
+
+    if (gearHeld)
+      gearRPM = data.speed * rpmPerKmhPerRatio * gearRatios[displayGear];
+
+    float rpmPerRatio = gearRPM / gearRatios[displayGear];
+
+    if (displayGear < GEAR_COUNT)
+      nextRPM = rpmPerRatio * gearRatios[displayGear + 1];
+
+    if (displayGear > 1)
+      previousRPM = rpmPerRatio * gearRatios[displayGear - 1];
   }
 
   if (nextRPM != 0)
@@ -194,7 +274,11 @@ void updateShiftPoints()
 void updateLEDs()
 {
   ring.clear();
-  
+
+  // Track the gear every frame, even when the shift points aren't
+  // drawn, so a shift made above SHIFT_POINT_LOW isn't missed.
+  updateDisplayGear();
+
   // Priority 1: Oil overtemperature
   if (data.oilValid && data.oilOvertemp)
   {
@@ -204,7 +288,9 @@ void updateLEDs()
   // Priority 2: Oil warming
   else if (data.oilValid && data.oilWarming)
   {
-    int oilTempScaled = map(data.oilC, 0, ENGINE_OPERATING_TEMP, 10, LED_COUNT);
+    // Same scale as before (0 C -> 10 LEDs off, operating temp ->
+    // all off), but kept fractional for the fade.
+    float oilTempScaled = 10 + data.oilC * (LED_COUNT - 10) / ENGINE_OPERATING_TEMP;
     updateOilWarmingAnimation(oilTempScaled);
   }
 
