@@ -172,6 +172,58 @@ void updateOilWarmingAnimation(float position)
   }
 }
 
+// RPM scale: 0 to RPM_SCALE_MAX across LEDs RPM_LED_FIRST to
+// RPM_LED_LAST.
+const uint8_t RPM_LED_FIRST = 6;
+const uint8_t RPM_LED_LAST = 21;
+const uint16_t RPM_SCALE_MAX = 7500;
+
+// Markers are summed here before drawing, so markers that share
+// an LED add together instead of overwriting each other.
+uint8_t markerR[LED_COUNT];
+uint8_t markerG[LED_COUNT];
+uint8_t markerB[LED_COUNT];
+
+void clearMarkers()
+{
+  memset(markerR, 0, sizeof(markerR));
+  memset(markerG, 0, sizeof(markerG));
+  memset(markerB, 0, sizeof(markerB));
+}
+
+void addMarkerPixel(int led, uint8_t r, uint8_t g, uint8_t b, float level)
+{
+  // Off the scale: just the part of the marker still on it is drawn.
+  if (led < RPM_LED_FIRST || led > RPM_LED_LAST)
+    return;
+
+  markerR[led] = min(255, markerR[led] + (int)(r * level));
+  markerG[led] = min(255, markerG[led] + (int)(g * level));
+  markerB[led] = min(255, markerB[led] + (int)(b * level));
+}
+
+// Same fractional fade as updateOilWarmingAnimation(): a value
+// between two LEDs lights both, each in proportion to how close
+// the value is, so the marker glides instead of stepping.
+void addMarker(float rpm, uint8_t r, uint8_t g, uint8_t b)
+{
+  float position = RPM_LED_FIRST + rpm * (RPM_LED_LAST - RPM_LED_FIRST) / RPM_SCALE_MAX;
+
+  int led = (int)floorf(position);
+  float fade = position - led;
+
+  addMarkerPixel(led, r, g, b, 1.0 - fade);
+  addMarkerPixel(led + 1, r, g, b, fade);
+}
+
+void drawMarkers()
+{
+  for (int i = RPM_LED_FIRST; i <= RPM_LED_LAST; i++)
+  {
+    ring.setPixelColor(i, markerR[i], markerG[i], markerB[i]);
+  }
+}
+
 uint32_t nextRPM = 0;
 uint32_t previousRPM = 0;
 
@@ -259,16 +311,21 @@ void updateShiftPoints()
       previousRPM = rpmPerRatio * gearRatios[displayGear - 1];
   }
 
-  if (nextRPM != 0)
+  clearMarkers();
+
+  if (nextRPM > NEXT_GEAR_MIN_RPM)
   {
-    ring.setPixelColor(map(nextRPM, 0, 7500, 6, 21), 255, 255, 0);
+    float level = constrain((float)(nextRPM - NEXT_GEAR_MIN_RPM) / NEXT_GEAR_FADE_RPM, 0.0, 1.0);
+    addMarker(nextRPM, 255 * level, 255 * level, 0);
   }
-  if (previousRPM != 0 && previousRPM < 7500)
+  if (previousRPM != 0)
   {
-    ring.setPixelColor(map(previousRPM, 0, 7500, 6, 21), 255, 255, 0);
+    addMarker(previousRPM, 255, 255, 0);
   }
 
-  ring.setPixelColor(map(data.rpm, 0, 7500, 6, 21), 125, 125, 125);
+  addMarker(data.rpm, 125, 125, 125);
+
+  drawMarkers();
 }
 
 void updateLEDs()

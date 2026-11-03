@@ -23,10 +23,14 @@ Adafruit_NeoPixel ring(Adafruit_NeoPixel(LED_COUNT, RING_PIN, NEO_GRB + NEO_KHZ8
 
 const uint8_t ENGINE_OPERATING_TEMP = 80;
 const uint8_t ENGINE_OVERTEMP = 120;
-const uint16_t SHIFT_POINT_LOW = 5300;
-const uint16_t SHIFT_POINT_MID = 5900;
-const uint16_t SHIFT_POINT_HIGH = 6500;
-const uint16_t SHIFT_POINT_MAX = 7100;
+const uint16_t SHIFT_POINT_LOW = 5200;
+const uint16_t SHIFT_POINT_MID = 5800;
+const uint16_t SHIFT_POINT_HIGH = 6400;
+const uint16_t SHIFT_POINT_MAX = 7000;
+// Hide the next gear marker until its RPM is above this, then fade
+// it in to full brightness over the next NEXT_GEAR_FADE_RPM.
+const uint16_t NEXT_GEAR_MIN_RPM = 2000;
+const uint16_t NEXT_GEAR_FADE_RPM = 500;
 const uint8_t GEAR_COUNT = 6;
 // Keep showing the last gear in neutral above this speed.
 // OBD speed is km/h: 32 km/h = 20 mph.
