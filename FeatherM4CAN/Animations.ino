@@ -194,7 +194,7 @@ void updateShiftPoints()
 void updateLEDs()
 {
   ring.clear();
-
+  
   // Priority 1: Oil overtemperature
   if (data.oilValid && data.oilOvertemp)
   {

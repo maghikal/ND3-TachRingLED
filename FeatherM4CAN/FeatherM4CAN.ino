@@ -35,7 +35,11 @@ const uint8_t GEAR_COUNT = 6;
 
 const uint8_t REQUEST_INTERVAL_MS = 50;
 const uint8_t RESPONSE_TIMEOUT_MS = 40;
+// Re-initialize the CAN controller if no PCM response for this long.
+const uint16_t CAN_WATCHDOG_MS = 2000;
 uint32_t now = 0;
+uint32_t lastCANResponse = 0;
+uint32_t lastCANReset = 0;
 
 // ================================================================
 // Data
@@ -93,10 +97,10 @@ void setup()
   //setup ring LED
   pinMode(RING_PIN, OUTPUT);
   ring.begin(); 
-  ring.setBrightness(255); // Set global brightness for the whole strip 0-255  
+  ring.setBrightness(32); // Set global brightness for the whole strip 0-255  
   //ring.show();
 
-  //testAnimation();
+  testAnimation();
   bootAnimation();
 
   // ND3 OBD-II CAN bus is 500 kbit/s.
@@ -118,7 +122,9 @@ void setup()
 void loop()
 {
   now = millis();
-  
+
+  checkCANWatchdog();
+
   updateVehicleData();
 
   updateLEDs();

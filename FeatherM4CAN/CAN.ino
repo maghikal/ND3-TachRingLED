@@ -33,6 +33,41 @@ void sendMode01(uint8_t pid)
 
 
 // ================================================================
+// CAN watchdog
+// ================================================================
+//
+// If the Feather boots before the car, nothing on the bus ACKs our
+// requests. The controller goes error passive and keeps retrying
+// the unacknowledged frame forever (the library never cancels it,
+// and ACK errors never reach bus-off, so its auto-recovery never
+// runs). Sometimes it does not recover when the car wakes up.
+//
+// Re-initializing the controller clears the error counters and
+// the stuck TX buffer. Repeats every CAN_WATCHDOG_MS until the
+// PCM answers.
+//
+// ================================================================
+
+void checkCANWatchdog()
+{
+  if ((now - lastCANResponse) < CAN_WATCHDOG_MS)
+    return;
+
+  if ((now - lastCANReset) < CAN_WATCHDOG_MS)
+    return;
+
+  lastCANReset = now;
+
+  Serial.println("No CAN response, re-initializing CAN...");
+
+  CAN.end();
+
+  if (!CAN.begin(500000))
+    Serial.println("CAN re-initialization FAILED!");
+}
+
+
+// ================================================================
 // Send Mazda Mode 22 request
 // ================================================================
 //
@@ -134,6 +169,7 @@ bool getResponse(uint8_t *response, uint8_t &length)
       continue;
 
     length = count;
+    lastCANResponse = millis();
 
     return true;
   }
