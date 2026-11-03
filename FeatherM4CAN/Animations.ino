@@ -330,6 +330,10 @@ void updateShiftPoints()
 
 void updateLEDs()
 {
+  // Console "led" command
+  if (drawLEDOverride())
+    return;
+
   ring.clear();
 
   // Track the gear every frame, even when the shift points aren't

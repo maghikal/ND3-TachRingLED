@@ -16,6 +16,29 @@
 //
 // ================================================================
 
+
+// Commands
+//
+// can on / can off	// Turns CAN polling (and the CAN watchdog) back on or off. can on also stops all sweeps and clears the values you set.
+// set <field> <value>	// Sets one value.
+// sweep <field> <start> <end> <ms> [once|loop|bounce]	// Ramps a value from start to end over the given time. once stops at the end value, loop jumps back to the start and repeats, and bounce goes back and forth.
+// stop [field|all]	// Stops a sweep and keeps the current value.
+// invalid <field|all>	// Marks values as N/A, to test the “no data” state.
+// clear	// Stops all sweeps and clears all values.
+// status	// Prints the data once.
+// print on|off	// Turns the 10 Hz data printout on or off. It floods the monitor, so turning it off makes typing easier.
+//
+// The fields are rpm, speed (km/h), gear (0 means neutral), ratio and oil (°C).
+
+// LED overrides
+//
+// led 5 255 0 0	// Lights LED 5 red.
+// led 6-21 0 255 0	// Lights LEDs 6 to 21 green. A reversed range like 21-6 also works.
+// led all 0 0 255	// Lights the whole ring blue.
+// led 6-10 off	// Turns those LEDs off.
+// led auto	// Goes back to the normal display.
+
+
 const uint8_t MANUAL_REFRESH_MS = 50;
 uint32_t lastManualRefresh = 0;
 
@@ -48,6 +71,11 @@ struct Sweep
 };
 
 Sweep sweeps[FIELD_COUNT];
+
+// LED override. While active, updateLEDs() shows ledOverride[]
+// instead of the vehicle data display.
+bool ledOverrideActive = false;
+uint32_t ledOverride[LED_COUNT];
 
 const uint8_t CONSOLE_LINE_MAX = 80;
 char consoleLine[CONSOLE_LINE_MAX];
@@ -230,6 +258,86 @@ void invalidateField(uint8_t field)
 
 
 // ================================================================
+// LED override
+// ================================================================
+//
+// Called at the start of updateLEDs(). Returns true if it drew
+// the ring, so the normal display is skipped.
+//
+// ================================================================
+
+bool drawLEDOverride()
+{
+  if (!ledOverrideActive)
+    return false;
+
+  for (uint8_t i = 0; i < LED_COUNT; i++)
+    ring.setPixelColor(i, ledOverride[i]);
+
+  ring.show();
+
+  return true;
+}
+
+// Parses "n", "first-last" or "all" into an LED range.
+bool parseLEDRange(const char *text, int &first, int &last)
+{
+  if (text == NULL)
+    return false;
+
+  if (strcasecmp(text, "all") == 0)
+  {
+    first = 0;
+    last = LED_COUNT - 1;
+    return true;
+  }
+
+  char *end;
+  first = strtol(text, &end, 10);
+
+  if (end == text)
+    return false;
+
+  if (*end == '\0')
+  {
+    last = first;
+  }
+  else if (*end == '-')
+  {
+    const char *lastText = end + 1;
+    last = strtol(lastText, &end, 10);
+
+    if (end == lastText || *end != '\0')
+      return false;
+  }
+  else
+  {
+    return false;
+  }
+
+  if (first > last)
+  {
+    int swap = first;
+    first = last;
+    last = swap;
+  }
+
+  return first >= 0 && last < LED_COUNT;
+}
+
+bool parseColorChannel(const char *text, uint8_t &value)
+{
+  float number;
+
+  if (!parseNumber(text, number) || number < 0 || number > 255)
+    return false;
+
+  value = (uint8_t)number;
+  return true;
+}
+
+
+// ================================================================
 // CAN polling control
 // ================================================================
 
@@ -279,6 +387,13 @@ void printHelp()
   Serial.println("  stop [field|all]                       stop sweeps, hold values");
   Serial.println("  invalid <field|all>                    mark value(s) N/A");
   Serial.println("  clear                                  stop sweeps, clear all data");
+  Serial.println("  led <n|first-last|all> <r> <g> <b>     light LEDs (0-255)");
+  Serial.println("  led <n|first-last|all> off             turn LEDs off");
+  Serial.println("  led auto                               back to the data display");
+  Serial.println();
+  Serial.print("LEDs are numbered 0 to ");
+  Serial.print(LED_COUNT - 1);
+  Serial.println(". The first led command blanks the data display.");
   Serial.println();
   Serial.println("Fields: rpm, speed (km/h), gear (0 = neutral), ratio, oil (C)");
   Serial.println("set/sweep suspend CAN polling. Setting gear also sets ratio.");
@@ -477,6 +592,57 @@ void runCommand(char *line)
         invalidateField(field);
         Serial.print(fieldNames[field]);
         Serial.println(" = N/A");
+      }
+    }
+  }
+  else if (strcasecmp(command, "led") == 0)
+  {
+    int first, last;
+    uint8_t r, g, b;
+
+    if (arg1 && strcasecmp(arg1, "auto") == 0)
+    {
+      ledOverrideActive = false;
+      Serial.println("LEDs back to the data display");
+    }
+    else if (!parseLEDRange(arg1, first, last))
+    {
+      Serial.println("Usage: led <n|first-last|all> <r> <g> <b>");
+      Serial.println("       led <n|first-last|all> off");
+      Serial.println("       led auto");
+    }
+    else
+    {
+      bool off = arg2 && strcasecmp(arg2, "off") == 0;
+
+      if (!off && (!parseColorChannel(arg2, r) ||
+                   !parseColorChannel(arg3, g) ||
+                   !parseColorChannel(arg4, b)))
+      {
+        Serial.println("Colors are 0-255: led <n|first-last|all> <r> <g> <b>");
+      }
+      else
+      {
+        // Start from a blank ring, not the data display.
+        if (!ledOverrideActive)
+        {
+          memset(ledOverride, 0, sizeof(ledOverride));
+          ledOverrideActive = true;
+        }
+
+        uint32_t color = off ? 0 : ring.Color(r, g, b);
+
+        for (int i = first; i <= last; i++)
+          ledOverride[i] = color;
+
+        Serial.print("LED ");
+        Serial.print(first);
+        if (last != first)
+        {
+          Serial.print("-");
+          Serial.print(last);
+        }
+        Serial.println(off ? " off" : " set");
       }
     }
   }
