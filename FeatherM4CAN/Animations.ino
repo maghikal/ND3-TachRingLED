@@ -299,7 +299,7 @@ void updateShiftPoints() {
 //
 void updateShiftLights() {
   if (data.rpm > SHIFT_POINT_MAX) {
-    updateShiftFlash(0, 0, 255, 100);
+    updateShiftFlash(0, 0, 255, 50);
     return;
   }
 
