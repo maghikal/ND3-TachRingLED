@@ -214,8 +214,12 @@ void updateVehicleData()
   expireStaleData();
 
 
+  // Only print while at least one value is valid, i.e. the PCM has
+  // answered within DATA_STALE_MS (or a console value is set).
+  bool anyValid = data.rpmValid || data.speedValid || data.gearValid || data.oilValid;
+
   //Print complete dataset at 10Hz
-  if (printEnabled && (now - lastPrint) >= 100)
+  if (printEnabled && anyValid && (now - lastPrint) >= 100)
   {
     lastPrint = now;
     printData();
