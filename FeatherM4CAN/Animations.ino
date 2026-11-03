@@ -1,8 +1,7 @@
 // ================================================================
 // LED Animations
 // ================================================================
-void testAnimation()
-{
+void testAnimation() {
   ring.fill(ring.Color(255, 0, 0), 0, LED_COUNT);
   ring.show();
   delay(250);
@@ -17,23 +16,20 @@ void testAnimation()
 
   ring.clear();
 
-  for(int i=6;i < LED_COUNT;i++)
-  {
-    ring.setPixelColor(i, ring.Color(255,0,0));
+  for (int i = 6; i < LED_COUNT; i++) {
+    ring.setPixelColor(i, ring.Color(255, 0, 0));
     ring.show();
     delay(30);
   }
 
-  for(int i=6;i < LED_COUNT;i++)
-  {
-    ring.setPixelColor(i, ring.Color(0,255,0));
+  for (int i = 6; i < LED_COUNT; i++) {
+    ring.setPixelColor(i, ring.Color(0, 255, 0));
     ring.show();
     delay(30);
   }
-    
-  for(int i=6;i < LED_COUNT;i++)
-  {
-    ring.setPixelColor(i, ring.Color(0,0,255));
+
+  for (int i = 6; i < LED_COUNT; i++) {
+    ring.setPixelColor(i, ring.Color(0, 0, 255));
     ring.show();
     delay(30);
   }
@@ -51,36 +47,30 @@ int pulseLevel = 0;
 int pulseDirection = 1;
 uint32_t lastPulseUpdate = 0;
 
-void updateFullRingPulse(uint8_t r = 0, uint8_t g = 0, uint8_t b = 0, uint8_t maxLevel = 255, uint8_t stepInterval = 1.0)
-{
+void updateFullRingPulse(uint8_t r = 0, uint8_t g = 0, uint8_t b = 0, uint8_t maxLevel = 255, uint8_t stepInterval = 1.0) {
   // Only step the level on the interval, but always draw it:
   // updateLEDs() clears the ring every frame.
-  if ((now - lastPulseUpdate) >= stepInterval)
-  {
+  if ((now - lastPulseUpdate) >= stepInterval) {
     lastPulseUpdate = now;
     pulseLevel += pulseDirection;
 
-    if (pulseLevel >= maxLevel)
-    {
+    if (pulseLevel >= maxLevel) {
       pulseLevel = maxLevel;
       pulseDirection = -1;
-    }
-    else if (pulseLevel <= 0)
-    {
+    } else if (pulseLevel <= 0) {
       pulseLevel = 0;
       pulseDirection = 1;
     }
   }
 
   ring.fill(ring.Color(
-    map(pulseLevel, 0, 255, 0, r), 
-    map(pulseLevel, 0, 255, 0, g), 
-    map(pulseLevel, 0, 255, 0, b)
-    ), 0, LED_COUNT);
+              map(pulseLevel, 0, 255, 0, r),
+              map(pulseLevel, 0, 255, 0, g),
+              map(pulseLevel, 0, 255, 0, b)),
+            0, LED_COUNT);
 }
 
-void resetFullRingPulse()
-{
+void resetFullRingPulse() {
   pulseLevel = 0;
   pulseDirection = 1;
   lastPulseUpdate = 0;
@@ -88,29 +78,27 @@ void resetFullRingPulse()
 
 
 //Shift Flash Animation
+// Shift lights use LEDs 0 to SHIFT_LIGHT_COUNT - 1; the RPM scale
+// uses the rest.
+const uint8_t SHIFT_LIGHT_COUNT = 6;
+
 bool shiftFlashOn = false;
 uint32_t lastShiftFlash = 0;
 
-void updateFullRingFlash(uint8_t r, uint8_t g, uint8_t b, uint32_t flashinterval = 100)
-{
-  if ((now - lastShiftFlash) >= flashinterval)
-  {
+void updateShiftFlash(uint8_t r, uint8_t g, uint8_t b, uint32_t flashinterval = 100) {
+  if ((now - lastShiftFlash) >= flashinterval) {
     lastShiftFlash = now;
     shiftFlashOn = !shiftFlashOn;
   }
 
-  if (shiftFlashOn)
-  {
-    ring.fill(ring.Color(r, g, b), 0, LED_COUNT);
-  }
-  else
-  {
-    ring.clear();
+  if (shiftFlashOn) {
+    ring.fill(ring.Color(r, g, b), 0, SHIFT_LIGHT_COUNT);
+  } else {
+    ring.fill(0, 0, SHIFT_LIGHT_COUNT);
   }
 }
 
-void resetFullRingFlash()
-{
+void resetShiftFlash() {
   shiftFlashOn = false;
   lastShiftFlash = now;
 }
@@ -121,17 +109,14 @@ void resetFullRingFlash()
 // Animation States
 // ================================================================
 
-void bootAnimation()
-{
+void bootAnimation() {
   uint8_t cycles = 1;
   uint32_t count = 0;
   uint32_t lastStep = 0;
   uint8_t stepInterval = 3;
-  while (count < (255 * 2 * cycles))
-  {
+  while (count < (255 * 2 * cycles)) {
     now = millis();
-    if ((now - lastStep) > stepInterval)
-    {
+    if ((now - lastStep) > stepInterval) {
       lastStep = now;
       updateFullRingPulse(255, 255, 255, 255, stepInterval);
       count++;
@@ -147,26 +132,19 @@ int lastOilTemp = -1;
 // position is how many LEDs are off, counting from LED 0. The
 // fractional part fades the next LED out, so the bar shrinks
 // smoothly instead of stepping one LED at a time.
-void updateOilWarmingAnimation(float position)
-{
+void updateOilWarmingAnimation(float position) {
   position = constrain(position, 0, LED_COUNT);
 
   int fullyOff = (int)position;
   float fade = position - fullyOff;
 
-  for (int i = 0; i < LED_COUNT; i++)
-  {
+  for (int i = 0; i < LED_COUNT; i++) {
     // Turn LEDs off from left to right
-    if (i < fullyOff)
-    {
+    if (i < fullyOff) {
       ring.setPixelColor(i, 0, 0, 0);
-    }
-    else if (i == fullyOff)
-    {
+    } else if (i == fullyOff) {
       ring.setPixelColor(i, (uint8_t)(255 * (1.0 - fade)), 0, 0);
-    }
-    else
-    {
+    } else {
       ring.setPixelColor(i, 255, 0, 0);
     }
   }
@@ -184,15 +162,13 @@ uint8_t markerR[LED_COUNT];
 uint8_t markerG[LED_COUNT];
 uint8_t markerB[LED_COUNT];
 
-void clearMarkers()
-{
+void clearMarkers() {
   memset(markerR, 0, sizeof(markerR));
   memset(markerG, 0, sizeof(markerG));
   memset(markerB, 0, sizeof(markerB));
 }
 
-void addMarkerPixel(int led, uint8_t r, uint8_t g, uint8_t b, float level)
-{
+void addMarkerPixel(int led, uint8_t r, uint8_t g, uint8_t b, float level) {
   // Off the scale: just the part of the marker still on it is drawn.
   if (led < RPM_LED_FIRST || led > RPM_LED_LAST)
     return;
@@ -205,8 +181,7 @@ void addMarkerPixel(int led, uint8_t r, uint8_t g, uint8_t b, float level)
 // Same fractional fade as updateOilWarmingAnimation(): a value
 // between two LEDs lights both, each in proportion to how close
 // the value is, so the marker glides instead of stepping.
-void addMarker(float rpm, uint8_t r, uint8_t g, uint8_t b)
-{
+void addMarker(float rpm, uint8_t r, uint8_t g, uint8_t b) {
   float position = RPM_LED_FIRST + rpm * (RPM_LED_LAST - RPM_LED_FIRST) / RPM_SCALE_MAX;
 
   int led = (int)floorf(position);
@@ -216,10 +191,8 @@ void addMarker(float rpm, uint8_t r, uint8_t g, uint8_t b)
   addMarkerPixel(led + 1, r, g, b, fade);
 }
 
-void drawMarkers()
-{
-  for (int i = RPM_LED_FIRST; i <= RPM_LED_LAST; i++)
-  {
+void drawMarkers() {
+  for (int i = RPM_LED_FIRST; i <= RPM_LED_LAST; i++) {
     ring.setPixelColor(i, markerR[i], markerG[i], markerB[i]);
   }
 }
@@ -241,8 +214,7 @@ bool gearHeld = false;
 float rpmPerKmhPerRatio = RPM_PER_KMH_PER_RATIO;
 uint32_t lastLearnRpmTime = 0;
 
-void learnRpmPerKmh()
-{
+void learnRpmPerKmh() {
   // One sample per new RPM reading, not per LED frame.
   if (data.rpmTime == lastLearnRpmTime)
     return;
@@ -261,40 +233,32 @@ void learnRpmPerKmh()
   rpmPerKmhPerRatio += (sample - rpmPerKmhPerRatio) * 0.05;
 }
 
-void updateDisplayGear()
-{
-  if (!data.gearValid || !data.speedValid)
-  {
+void updateDisplayGear() {
+  if (!data.gearValid || !data.speedValid) {
     displayGear = 0;
     gearHeld = false;
   }
   // Real gear (1..GEAR_COUNT) while moving; the reported gear is
   // meaningless when stopped.
-  else if (data.gearStatus >= 1 && data.gearStatus <= GEAR_COUNT && data.speed > 0)
-  {
+  else if (data.gearStatus >= 1 && data.gearStatus <= GEAR_COUNT && data.speed > 0) {
     displayGear = data.gearStatus;
     gearHeld = false;
     learnRpmPerKmh();
-  }
-  else if (data.speed < NEUTRAL_HOLD_MIN_KMH)
-  {
+  } else if (data.speed < NEUTRAL_HOLD_MIN_KMH) {
     displayGear = 0;
     gearHeld = false;
   }
   // Otherwise neutral above the hold speed: keep the last gear.
-  else if (displayGear != 0)
-  {
+  else if (displayGear != 0) {
     gearHeld = true;
   }
 }
 
-void updateShiftPoints()
-{
+void updateShiftPoints() {
   nextRPM = 0;
   previousRPM = 0;
 
-  if (displayGear != 0)
-  {
+  if (displayGear != 0) {
     // In gear the engine RPM matches the road speed. In neutral it
     // doesn't, so use the RPM the held gear would have at this speed.
     float gearRPM = data.rpm;
@@ -313,13 +277,11 @@ void updateShiftPoints()
 
   clearMarkers();
 
-  if (nextRPM > NEXT_GEAR_MIN_RPM)
-  {
+  if (nextRPM > NEXT_GEAR_MIN_RPM) {
     float level = constrain((float)(nextRPM - NEXT_GEAR_MIN_RPM) / NEXT_GEAR_FADE_RPM, 0.0, 1.0);
     addMarker(nextRPM, 255 * level, 255 * level, 0);
   }
-  if (previousRPM != 0)
-  {
+  if (previousRPM != 0) {
     addMarker(previousRPM, 255, 255, 0);
   }
 
@@ -328,8 +290,36 @@ void updateShiftPoints()
   drawMarkers();
 }
 
-void updateLEDs()
-{
+// Shift lights on LEDs 0-5, filling in from the outside:
+//
+//   LOW   R - - - - R
+//   MID   R Y - - Y R
+//   HIGH  R Y G G Y R
+//   MAX   flashing blue
+//
+void updateShiftLights() {
+  if (data.rpm > SHIFT_POINT_MAX) {
+    updateShiftFlash(0, 0, 255, 100);
+    return;
+  }
+
+  resetShiftFlash();
+
+  if (data.rpm > SHIFT_POINT_LOW) {
+    ring.setPixelColor(0, 255, 0, 0);
+    ring.setPixelColor(5, 255, 0, 0);
+  }
+  if (data.rpm > SHIFT_POINT_MID) {
+    ring.setPixelColor(1, 255, 255, 0);
+    ring.setPixelColor(4, 255, 255, 0);
+  }
+  if (data.rpm > SHIFT_POINT_HIGH) {
+    ring.setPixelColor(2, 0, 255, 0);
+    ring.setPixelColor(3, 0, 255, 0);
+  }
+}
+
+void updateLEDs() {
   // Console "led" command
   if (drawLEDOverride())
     return;
@@ -337,57 +327,31 @@ void updateLEDs()
   ring.clear();
 
   // Track the gear every frame, even when the shift points aren't
-  // drawn, so a shift made above SHIFT_POINT_LOW isn't missed.
+  // drawn, so a shift made during an oil warning isn't missed.
   updateDisplayGear();
 
   // Priority 1: Oil overtemperature
-  if (data.oilValid && data.oilOvertemp)
-  {
+  if (data.oilValid && data.oilOvertemp) {
     updateFullRingPulse(255, 0, 0);
   }
 
   // Priority 2: Oil warming
-  else if (data.oilValid && data.oilWarming)
-  {
+  else if (data.oilValid && data.oilWarming) {
     // Same scale as before (0 C -> 10 LEDs off, operating temp ->
     // all off), but kept fractional for the fade.
     float oilTempScaled = 10 + data.oilC * (LED_COUNT - 10) / ENGINE_OPERATING_TEMP;
     updateOilWarmingAnimation(oilTempScaled);
   }
 
-  // Priority 3: Shift indicator
-  else if (data.rpmValid)
-  {
-    if (data.rpm > SHIFT_POINT_MAX)
-    {
-      updateFullRingFlash(0, 0, 255, 50);
-    }
-    else if (data.rpm > SHIFT_POINT_HIGH)
-    {
-      resetFullRingFlash();
-      ring.fill(ring.Color(0, 255, 0), 0, LED_COUNT);
-    }
-    else if (data.rpm > SHIFT_POINT_MID)
-    {
-      resetFullRingFlash();
-      ring.fill(ring.Color(255, 255, 0), 0, LED_COUNT);
-    }
-    else if (data.rpm > SHIFT_POINT_LOW)
-    {
-      resetFullRingFlash();
-      ring.fill(ring.Color(255, 0, 0), 0, LED_COUNT);
-    }
-    else
-    {
-      resetFullRingFlash();
-      updateShiftPoints();
-    }
+  // Priority 3: RPM scale and shift lights
+  else if (data.rpmValid) {
+    updateShiftPoints();
+    updateShiftLights();
   }
 
   // Priority 4: No valid display condition
-  else
-  {
-    resetFullRingFlash();
+  else {
+    resetShiftFlash();
     ring.clear();
   }
 
